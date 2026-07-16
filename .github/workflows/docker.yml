@@ -1,0 +1,145 @@
+name: docker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    # Weekly rebuild so base image security updates land without a commit.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      smoke_test:
+        description: "Boot a real server to verify the build (adds ~6 min)"
+        type: boolean
+        default: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/valheim-server
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint shell scripts
+        run: shellcheck entrypoint.sh mkworld.sh test.sh
+      - name: Validate compose file
+        # The service declares `env_file: .env`, so compose needs one to exist.
+        run: cp .env.example .env && docker compose config -q
+      - name: Test the .fwl seed writer
+        run: ./test.sh
+
+  # Boots an actual Valheim server and proves the generated world loads. This is
+  # what catches a Steam-side change to the .fwl format, which the unit tests
+  # cannot see — they only check our own writer against itself.
+  smoke:
+    needs: lint
+    if: github.event_name != 'workflow_dispatch' || inputs.smoke_test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: valheim:smoke
+          cache-from: type=gha
+
+      - name: Boot server with a fixed seed
+        run: |
+          mkdir -p data && chmod 777 data
+          docker run -d --name smoke \
+            -e SERVER_NAME="Smoke Test" \
+            -e SERVER_PASSWORD="smoketest123" \
+            -e WORLD_NAME="SmokeWorld" \
+            -e WORLD_SEED="Seed123" \
+            -e SERVER_PUBLIC=0 \
+            -e WORLD_MODIFIERS="combat=hard raids=none" \
+            -e WORLD_KEYS="nobuildcost" \
+            -e ADMIN_IDS="76561198000000001,76561198000000002" \
+            -v "$PWD/data:/config" \
+            valheim:smoke
+
+          # Steam pulls ~1.5 GB before the server starts.
+          for _ in $(seq 1 80); do
+            if docker logs smoke 2>&1 | grep -q "Load world: SmokeWorld"; then
+              echo "server loaded the generated world"; exit 0
+            fi
+            if docker logs smoke 2>&1 | grep -qE "^FATAL|Error! App"; then
+              docker logs smoke; exit 1
+            fi
+            sleep 15
+          done
+          echo "::error::server never loaded the world"
+          docker logs smoke | tail -50
+          exit 1
+
+      - name: Verify seed and lists landed
+        run: |
+          docker logs smoke 2>&1 | grep -q "Setting world modifier: combat->hard" \
+            || { echo "::error::modifiers not applied"; exit 1; }
+          [ "$(wc -l < data/adminlist.txt)" = "2" ] \
+            || { echo "::error::adminlist not written"; exit 1; }
+          python3 - <<'PY'
+          import struct, sys
+          d = open("data/worlds_local/SmokeWorld.fwl", "rb").read()
+          o = 8
+          n = d[o]; o += 1; name = d[o:o+n].decode(); o += n
+          n = d[o]; o += 1; seed = d[o:o+n].decode(); o += n
+          h = struct.unpack_from("<i", d, o)[0]
+          print("world:", name, "seed:", seed, "hash:", h)
+          if (seed, h) != ("Seed123", 502027295):
+              sys.exit("::error::server did not preserve the seed")
+          PY
+
+      - name: Stop cleanly (world must save on SIGTERM)
+        run: |
+          docker stop -t 90 smoke
+          docker logs smoke 2>&1 | grep -q "Stopping, saving world" \
+            || { echo "::error::SIGTERM was not translated to SIGINT"; exit 1; }
+
+  build:
+    needs: [lint, smoke]
+    # Still publish when the smoke test is skipped on a manual run.
+    if: always() && needs.lint.result == 'success' && needs.smoke.result != 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

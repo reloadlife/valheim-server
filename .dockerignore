@@ -1,0 +1,7 @@
+.git
+.github
+.agents
+data
+*.md
+.env
+LICENSE

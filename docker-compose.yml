@@ -1,0 +1,26 @@
+services:
+  valheim:
+    # Prebuilt image from this repo's CI. To build locally instead, comment out
+    # `image:` and uncomment `build:`.
+    image: ghcr.io/reloadlife/valheim-server:latest
+    # build: .
+    container_name: valheim
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${SERVER_PORT:-2456}:${SERVER_PORT:-2456}/udp"
+      - "${SERVER_QUERY_PORT:-2457}:${SERVER_QUERY_PORT:-2457}/udp"
+    volumes:
+      - ./data:/config
+      - valheim-server:/valheim
+    # The world is only written on SIGINT; give it room to finish before SIGKILL.
+    stop_grace_period: 2m
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f valheim_server.x86_64 > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5m
+
+volumes:
+  valheim-server:
