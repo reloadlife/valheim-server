@@ -47,7 +47,25 @@ if [[ "$UPDATE_ON_START" == "true" || ! -x "$INSTALL_DIR/valheim_server.x86_64" 
   update_args=(+force_install_dir "$INSTALL_DIR" +login anonymous +app_update 896660)
   [[ -n "$STEAM_BETA" ]] && update_args+=(-beta "$STEAM_BETA")
   [[ "$VALIDATE_ON_UPDATE" == "true" ]] && update_args+=(validate)
-  steamcmd "${update_args[@]}" +quit
+
+  # An out-of-date steamcmd self-updates and relaunches itself mid-session, which
+  # drops the queued +app_update and fails with "Missing configuration". Let it do
+  # that in a throwaway invocation first; it's a no-op once already current.
+  echo "==> Bootstrapping steamcmd"
+  steamcmd +quit > /dev/null 2>&1 || true
+
+  # Steam's CDN fails often enough that a single attempt is a coin flip on a bad day.
+  for attempt in 1 2 3; do
+    if steamcmd "${update_args[@]}" +quit; then
+      break
+    fi
+    if (( attempt == 3 )); then
+      echo "FATAL: steamcmd could not install app 896660 after 3 attempts." >&2
+      exit 1
+    fi
+    echo "==> steamcmd failed (attempt $attempt/3), retrying in 15s..."
+    sleep 15
+  done
 fi
 
 mkdir -p "$SAVE_DIR/worlds_local"
