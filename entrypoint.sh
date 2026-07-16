@@ -23,8 +23,9 @@ BACKUP_SHORT="${BACKUP_SHORT:-7200}"
 BACKUP_LONG="${BACKUP_LONG:-43200}"
 STEAM_BETA="${STEAM_BETA:-}"
 
-INSTALL_DIR=/valheim
-SAVE_DIR=/config
+INSTALL_DIR="${INSTALL_DIR:-/valheim}"
+# Overridable so test.sh can exercise the validation without writing to /config.
+SAVE_DIR="${SAVE_DIR:-/config}"
 
 # Valheim refuses to boot on a password shorter than 5 chars or one contained in
 # the server name. Fail loudly here instead of crash-looping with a cryptic log.
@@ -125,17 +126,48 @@ fi
 [[ -n "$SERVER_PRESET" ]] && args+=(-preset "$SERVER_PRESET")
 
 # WORLD_MODIFIERS="combat=hard raids=none" -> -modifier combat hard -modifier raids none
+# Same as WORLD_KEYS: a bad name or value is ignored silently by the server, which
+# looks identical to "the setting didn't work". Reject it up front.
 for pair in $WORLD_MODIFIERS; do
   if [[ "$pair" != *=* ]]; then
     echo "FATAL: WORLD_MODIFIERS entry '$pair' must be name=value." >&2
     exit 1
   fi
-  args+=(-modifier "${pair%%=*}" "${pair#*=}")
+  mod_name=${pair%%=*}
+  mod_value=${pair#*=}
+  case "${mod_name,,}" in
+    combat)       valid="veryeasy easy hard veryhard" ;;
+    deathpenalty) valid="casual veryeasy easy hard hardcore" ;;
+    resources)    valid="muchless less more muchmore most" ;;
+    raids)        valid="none muchless less more muchmore" ;;
+    portals)      valid="casual hard veryhard" ;;
+    *)
+      echo "FATAL: unknown WORLD_MODIFIERS name '$mod_name'." >&2
+      echo "       Valid names: combat deathpenalty resources raids portals" >&2
+      exit 1
+      ;;
+  esac
+  if [[ " $valid " != *" ${mod_value,,} "* ]]; then
+    echo "FATAL: invalid value '$mod_value' for modifier '$mod_name'." >&2
+    echo "       Valid values: $valid" >&2
+    exit 1
+  fi
+  args+=(-modifier "${mod_name,,}" "${mod_value,,}")
 done
 
 # WORLD_KEYS="nobuildcost playerevents" -> -setkey nobuildcost -setkey playerevents
+# The server ignores an unknown key without a word of complaint, so a typo would
+# quietly mean "toggle never applied". Check against the documented set instead.
 for key in $WORLD_KEYS; do
-  args+=(-setkey "$key")
+  case "${key,,}" in
+    nobuildcost|playerevents|passivemobs|nomap) ;;
+    *)
+      echo "FATAL: unknown WORLD_KEYS entry '$key'." >&2
+      echo "       Valid keys: nobuildcost playerevents passivemobs nomap" >&2
+      exit 1
+      ;;
+  esac
+  args+=(-setkey "${key,,}")
 done
 # shellcheck disable=SC2206
 [[ -n "$SERVER_ARGS" ]] && args+=($SERVER_ARGS)

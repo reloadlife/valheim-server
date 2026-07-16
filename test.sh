@@ -56,6 +56,46 @@ for bad in "toolongseed11" "has space" "sym!"; do
   fi
 done
 
+# WORLD_KEYS / WORLD_MODIFIERS validation. The server ignores a bad key silently,
+# so these guards are the only thing between a typo and a setting that looks
+# applied but never was.
+#
+# entrypoint always ends by failing to exec the (absent) server binary, so a
+# nonzero exit proves nothing — grep for the FATAL line the guards actually emit.
+mkdir -p "$tmp/stub"
+printf '#!/bin/sh\nexit 0\n' > "$tmp/stub/steamcmd"; chmod +x "$tmp/stub/steamcmd"
+printf '#!/bin/sh\nexit 0\n' > "$tmp/stub/mkworld.sh"; chmod +x "$tmp/stub/mkworld.sh"
+
+entry_fatal() { # entry_fatal <VAR=value>... -> prints the FATAL line, if any
+  env SERVER_PUBLIC=0 SAVE_DIR="$tmp/save" PATH="$tmp/stub:$PATH" "$@" \
+    bash ./entrypoint.sh 2>&1 | grep -m1 '^FATAL' || true
+}
+
+for bad in "combat=nonsense" "nosuchmod=hard" "combat"; do
+  if [[ -n "$(entry_fatal WORLD_MODIFIERS="$bad")" ]]; then
+    echo "ok   rejects modifier '$bad'"
+  else
+    echo "FAIL rejects modifier '$bad': accepted it"; fails=$((fails + 1))
+  fi
+done
+for bad in "noportals" "nocraftcost" "typo"; do
+  if [[ -n "$(entry_fatal WORLD_KEYS="$bad")" ]]; then
+    echo "ok   rejects key '$bad'"
+  else
+    echo "FAIL rejects key '$bad': accepted it"; fails=$((fails + 1))
+  fi
+done
+
+# Positive control: without this, a guard that rejects *everything* would pass
+# every check above.
+good=$(entry_fatal WORLD_MODIFIERS="combat=hard raids=none" WORLD_KEYS="nobuildcost nomap")
+check "accepts valid modifiers and keys" "$good" ""
+
+# A public server with no password is a footgun the server itself reports badly.
+pw=$(env SAVE_DIR="$tmp/save" PATH="$tmp/stub:$PATH" SERVER_PUBLIC=1 SERVER_PASSWORD= \
+       bash ./entrypoint.sh 2>&1 | grep -c 'needs SERVER_PASSWORD' || true)
+check "public server requires a password" "$pw" "1"
+
 echo
 if [[ $fails -eq 0 ]]; then
   echo "all passed"
