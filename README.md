@@ -119,6 +119,36 @@ docker compose pull && docker compose up -d
 CI also builds automatically on every push to `main`, on version tags, and weekly so
 base image security updates land without a commit.
 
+## Multiple worlds on one host
+
+[`docker-compose.multi.yml`](docker-compose.multi.yml) runs several worlds from a
+single compose file, sharing `.env` for the common settings:
+
+```bash
+docker compose -f docker-compose.multi.yml up -d
+```
+
+**It does not save RAM.** Valheim runs exactly one world per server process, so each
+world is its own container at ~2–3 GB. Budget `N × 3 GB` — two worlds want ~8 GB.
+Nothing about the process is shareable; what you save is duplicated config, not
+memory.
+
+Each world needs its own **UDP port pair** (the server always uses `SERVER_PORT+1`
+for Steam queries), so space them 2 apart: `2456/2457`, `2458/2459`. It also needs
+its own data directory and its own game install volume.
+
+| World | Ports | Data |
+| --- | --- | --- |
+| midgard | 2456–2457 | `./data/midgard` |
+| vanaheim | 2458–2459 | `./data/vanaheim` |
+
+Add a world by copying a service block and bumping the ports by 2. Note that
+`SERVER_PORT` must match the published port by hand — compose can't read a value out
+of `environment:` to reuse it.
+
+If RAM is the constraint, run one world and swap `WORLD_NAME` instead; the other
+worlds sit on disk costing nothing until you switch back.
+
 ## Data and backups
 
 Worlds live in `./data` on the host (`/config` in the container) — that directory is

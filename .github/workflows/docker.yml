@@ -25,9 +25,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Lint shell scripts
         run: shellcheck entrypoint.sh mkworld.sh test.sh
-      - name: Validate compose file
-        # The service declares `env_file: .env`, so compose needs one to exist.
-        run: cp .env.example .env && docker compose config -q
+      - name: Validate compose files
+        # The services declare `env_file: .env`, so compose needs one to exist.
+        run: |
+          cp .env.example .env
+          docker compose config -q
+          docker compose -f docker-compose.multi.yml config -q
       - name: Test the .fwl seed writer
         run: ./test.sh
 
