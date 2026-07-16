@@ -1,0 +1,66 @@
+# Several worlds on one host, from one compose file.
+#
+#   docker compose -f docker-compose.multi.yml up -d
+#
+# Valheim runs exactly one world per server process, so each world here is its own
+# container with its own RAM (~2-3 GB) and its own UDP port pair. There is no way
+# to share a process between worlds — plan the box around N x 3 GB.
+#
+# Shared settings (password, admins, modifiers) come from .env; per-world settings
+# are inline below and override it.
+#
+# Ports: each server also uses SERVER_PORT+1 for Steam queries, so worlds must be
+# spaced 2 apart. SERVER_PORT here must match the published port — compose cannot
+# read it back out of `environment:`.
+
+x-valheim: &valheim
+  image: ghcr.io/reloadlife/valheim-server:latest
+  restart: unless-stopped
+  env_file: .env
+  stop_grace_period: 2m
+  healthcheck:
+    test: ["CMD-SHELL", "pgrep -f valheim_server.x86_64 > /dev/null || exit 1"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 5m
+
+services:
+  midgard:
+    <<: *valheim
+    container_name: valheim-midgard
+    environment:
+      SERVER_NAME: "Midgard"
+      WORLD_NAME: "Midgard"
+      WORLD_SEED: "Meadows42"
+      SERVER_PORT: 2456
+    ports:
+      - "2456:2456/udp"
+      - "2457:2457/udp"
+    volumes:
+      - ./data/midgard:/config
+      - midgard-server:/valheim
+
+  # Second world: ports +2, its own data dir, its own game install.
+  vanaheim:
+    <<: *valheim
+    container_name: valheim-vanaheim
+    environment:
+      SERVER_NAME: "Vanaheim"
+      WORLD_NAME: "Vanaheim"
+      WORLD_SEED: "Ashlands7"
+      SERVER_PORT: 2458
+      SERVER_PRESET: "hard"
+    ports:
+      - "2458:2458/udp"
+      - "2459:2459/udp"
+    volumes:
+      - ./data/vanaheim:/config
+      - vanaheim-server:/valheim
+
+volumes:
+  # One game install per world. They could share a single volume to save ~1.5 GB
+  # of disk, but both containers run steamcmd against it at boot and would race on
+  # the same files. Disk is cheaper than a corrupted install.
+  midgard-server:
+  vanaheim-server:
