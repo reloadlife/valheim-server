@@ -96,6 +96,26 @@ pw=$(env SAVE_DIR="$tmp/save" PATH="$tmp/stub:$PATH" SERVER_PUBLIC=1 SERVER_PASS
        bash ./entrypoint.sh 2>&1 | grep -c 'needs SERVER_PASSWORD' || true)
 check "public server requires a password" "$pw" "1"
 
+# Docs drift. Every variable the entrypoint reads must be documented in both the
+# README table and .env.example, or "every setting is documented" quietly stops
+# being true the next time someone adds one.
+# shellcheck disable=SC2016 # matching a literal ${ in the source, not expanding
+for var in $(grep -oE '^[A-Z_]+="\$\{' entrypoint.sh | tr -d '="${' | sort -u); do
+  in_readme=$(grep -c "\`$var\`" README.md || true)
+  in_env=$(grep -cE "^(# *)?$var=" .env.example || true)
+  if [[ "$in_readme" == "0" ]]; then
+    echo "FAIL $var: not in README"; fails=$((fails + 1))
+  elif [[ "$in_env" == "0" ]]; then
+    echo "FAIL $var: not in .env.example"; fails=$((fails + 1))
+  else
+    echo "ok   documented: $var"
+  fi
+done
+# Compose-only knob: not read by entrypoint, so the loop above cannot catch it.
+# shellcheck disable=SC2016 # backticks are markdown, not a command substitution
+qp=$(grep -c '`SERVER_QUERY_PORT`' README.md)
+check "SERVER_QUERY_PORT documented" "$qp" "1"
+
 echo
 if [[ $fails -eq 0 ]]; then
   echo "all passed"
