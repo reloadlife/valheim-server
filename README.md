@@ -25,27 +25,101 @@ Then open **UDP 2456 and 2457** on your firewall/router and connect from Valheim
 
 ## Configuration
 
-Everything lives in `.env` — see [`.env.example`](.env.example) for the annotated list.
-Apply changes with `docker compose up -d`.
+Everything lives in `.env` — see [`.env.example`](.env.example) for the same list with
+inline comments. Apply changes with `docker compose up -d` (`restart` won't re-read
+`.env`).
+
+Every variable is optional except `SERVER_PASSWORD`, which a public server requires.
+Booleans are the literal strings `true` / `false`.
+
+### Identity
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `SERVER_NAME` | `My Valheim Server` | Name in the server browser. Cannot contain the password. |
-| `SERVER_PASSWORD` | — | Required for public servers. Minimum 5 characters. |
-| `WORLD_NAME` | `Dedicated` | Save file name. A new value creates a new world. |
-| `WORLD_SEED` | — | Seed for a **new** world. See [Seeds](#seeds). |
-| `SERVER_PORT` | `2456` | Game port (UDP). Query port is always this + 1. |
-| `SERVER_PUBLIC` | `1` | `1` lists it in the community browser, `0` is join-by-IP only. |
-| `CROSSPLAY` | `false` | `true` lets Xbox/PlayStation players join via PlayFab. |
-| `ADMIN_IDS` | — | SteamID64s that get admin powers. See [Access control](#access-control). |
-| `BANNED_IDS` | — | SteamID64s blocked from joining. |
-| `PERMITTED_IDS` | — | Allowlist. **Non-empty = everyone else is banned.** |
-| `SERVER_PRESET` | — | `casual`, `easy`, `hard`, `hardcore`, `immersive`, `hammer`. |
-| `WORLD_MODIFIERS` | — | Per-rule overrides, e.g. `combat=hard raids=none`. |
-| `WORLD_KEYS` | — | Toggles: `nobuildcost playerevents passivemobs nomap`. |
-| `SAVE_INTERVAL` | `1800` | Seconds between autosaves. |
-| `UPDATE_ON_START` | `true` | Pull the latest Steam build on every start. |
-| `SERVER_ARGS` | — | Raw extra flags, appended verbatim. |
+| `SERVER_NAME` | `My Valheim Server` | Name in the server browser. **Cannot contain the password** — the server refuses to boot if it does. |
+| `WORLD_NAME` | `Dedicated` | Save file name, and the `.db`/`.fwl` basename under `data/worlds_local/`. A new value creates a brand new world rather than renaming the old one. |
+| `WORLD_SEED` | — | Seed for a **new** world only. 1–10 alphanumeric chars. See [Seeds](#seeds). |
+
+### Networking
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `SERVER_PORT` | `2456` | Game port (UDP). |
+| `SERVER_QUERY_PORT` | `2457` | Steam query port. **Only publishes the Docker port** — the server hardcodes `SERVER_PORT+1`, so this must equal `SERVER_PORT+1` or the server is unreachable in the browser. |
+| `SERVER_PUBLIC` | `1` | `1` lists the server in the community browser, `0` hides it. Visibility only — **not** access control. |
+| `CROSSPLAY` | `false` | `true` switches the backend from Steam to PlayFab so Xbox/PlayStation players can join. Changes the ID format in the access lists. |
+
+### Access control
+
+See [Access control](#access-control) for the semantics. IDs are comma or space separated.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `ADMIN_IDS` | — | SteamID64s granted in-game admin commands. Writes `data/adminlist.txt`. |
+| `BANNED_IDS` | — | SteamID64s blocked from joining. Writes `data/bannedlist.txt`. |
+| `PERMITTED_IDS` | — | Allowlist. **Non-empty means everyone not listed is banned.** Writes `data/permittedlist.txt`. |
+
+Leave one unset and its file is never touched, so you can hand-edit it instead.
+
+### World rules
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `SERVER_PRESET` | — | Rule preset: `normal`, `casual`, `easy`, `hard`, `hardcore`, `immersive`, `hammer`. Empty = normal. Applied *before* `WORLD_MODIFIERS`, which override it. |
+| `WORLD_MODIFIERS` | — | Space-separated `name=value` overrides. See the table below. |
+| `WORLD_KEYS` | — | Space-separated boolean toggles. See the table below. |
+| `SAVE_INTERVAL` | `1800` | Seconds between world autosaves. |
+| `SERVER_ARGS` | — | Raw flags appended verbatim to the server command line, e.g. `-instanceid 1`. Unvalidated escape hatch. |
+
+`WORLD_MODIFIERS` — every valid name and value. Anything else is a startup error:
+
+| Name | Values |
+| --- | --- |
+| `combat` | `veryeasy`, `easy`, `hard`, `veryhard` |
+| `deathpenalty` | `casual`, `veryeasy`, `easy`, `hard`, `hardcore` |
+| `resources` | `muchless`, `less`, `more`, `muchmore`, `most` |
+| `raids` | `none`, `muchless`, `less`, `more`, `muchmore` |
+| `portals` | `casual`, `hard`, `veryhard` |
+
+Each has an implicit "normal" default with no keyword — omit the modifier to get it.
+Example: `WORLD_MODIFIERS=combat=hard raids=none portals=casual`
+
+`WORLD_KEYS` — the four documented toggles, matching the client's "Extra modifiers"
+checkboxes:
+
+| Key | Effect |
+| --- | --- |
+| `nobuildcost` | Hammer pieces cost no resources. You still must have discovered a material to build with it. |
+| `playerevents` | Raids trigger off each player's own progression instead of server-wide boss kills. |
+| `passivemobs` | Enemies don't attack until provoked. |
+| `nomap` | No map, no minimap. This is what the `immersive` preset does. |
+
+Example: `WORLD_KEYS=nobuildcost passivemobs`
+
+There is no `noportals` key — that's a legacy global key, replaced by the `portals`
+modifier. Both `WORLD_KEYS` and `WORLD_MODIFIERS` are validated at startup, because the
+server ignores an unknown key silently and that looks exactly like a setting that
+didn't work.
+
+### Updates and backups
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `UPDATE_ON_START` | `true` | Pull the latest Steam build on every container start. `false` pins whatever is installed — but the server still installs on first boot if missing. |
+| `VALIDATE_ON_UPDATE` | `false` | Add steamcmd `validate` to verify every file. Slow; turn on only when you suspect a corrupt install. |
+| `STEAM_BETA` | — | Opt into a Steam beta branch, e.g. `public-test`. Empty = stable. |
+| `BACKUPS` | `true` | Enable the server's own rolling backups (3 kept of each interval). |
+| `BACKUP_SHORT` | `7200` | Seconds between short-interval backups. Ignored when `BACKUPS=false`. |
+| `BACKUP_LONG` | `43200` | Seconds between long-interval backups. Ignored when `BACKUPS=false`. |
+
+### Paths
+
+Overridable but rarely worth changing — the compose volumes already map them.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `SAVE_DIR` | `/config` | Worlds and access lists. This is what `./data` mounts onto. |
+| `INSTALL_DIR` | `/valheim` | Game install. Backed by a named volume; disposable. |
 
 ## Seeds
 
