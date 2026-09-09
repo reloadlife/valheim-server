@@ -47,7 +47,7 @@ Booleans are the literal strings `true` / `false`.
 | `SERVER_PORT` | `2456` | Game port (UDP). |
 | `SERVER_QUERY_PORT` | `2457` | Steam query port. **Only publishes the Docker port** — the server hardcodes `SERVER_PORT+1`, so this must equal `SERVER_PORT+1` or the server is unreachable in the browser. |
 | `SERVER_PUBLIC` | `1` | `1` lists the server in the community browser, `0` hides it. Visibility only — **not** access control. |
-| `CROSSPLAY` | `false` | `true` switches the backend from Steam to PlayFab so Xbox/PlayStation players can join. Changes the ID format in the access lists. |
+| `CROSSPLAY` | `false` | `true` switches the backend from Steam to PlayFab so Xbox, PlayStation 5 and Switch 2 players can join (1.0 ships full crossplay). Changes the ID format in the access lists. |
 
 ### Access control
 
