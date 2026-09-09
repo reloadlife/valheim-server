@@ -71,7 +71,8 @@ jobs:
 
           # Steam pulls ~1.5 GB before the server starts.
           for _ in $(seq 1 80); do
-            if docker logs smoke 2>&1 | grep -q "Load world: SmokeWorld"; then
+            # 1.0 logs "ZNet.LoadWorld:" for a chunked world; older builds log "Load world:".
+            if docker logs smoke 2>&1 | grep -qE "(Load world|ZNet\.LoadWorld): SmokeWorld"; then
               echo "server loaded the generated world"; exit 0
             fi
             if docker logs smoke 2>&1 | grep -qE "^FATAL|Error! App"; then
@@ -90,15 +91,28 @@ jobs:
           [ "$(wc -l < data/adminlist.txt)" = "2" ] \
             || { echo "::error::adminlist not written"; exit 1; }
           python3 - <<'PY'
-          import struct, sys
-          d = open("data/worlds_local/SmokeWorld.fwl", "rb").read()
-          o = 8
-          n = d[o]; o += 1; name = d[o:o+n].decode(); o += n
-          n = d[o]; o += 1; seed = d[o:o+n].decode(); o += n
-          h = struct.unpack_from("<i", d, o)[0]
-          print("world:", name, "seed:", seed, "hash:", h)
-          if (seed, h) != ("Seed123", 502027295):
-              sys.exit("::error::server did not preserve the seed")
+          import glob, struct, sys
+          # A world the server has converted to the 1.0 chunk layout lives in a
+          # worlds_local/<name>/ directory and has no legacy .fwl left to parse.
+          legacy = "data/worlds_local/SmokeWorld.fwl"
+          try:
+              d = open(legacy, "rb").read()
+          except FileNotFoundError:
+              chunked = glob.glob("data/worlds_local/SmokeWorld/_main.*.fwl2")
+              if not chunked:
+                  sys.exit("::error::no world metadata in either layout")
+              blob = open(chunked[0], "rb").read()
+              print("chunked world:", chunked[0])
+              if b"Seed123" not in blob:
+                  sys.exit("::error::server did not preserve the seed")
+          else:
+              o = 8
+              n = d[o]; o += 1; name = d[o:o+n].decode(); o += n
+              n = d[o]; o += 1; seed = d[o:o+n].decode(); o += n
+              h = struct.unpack_from("<i", d, o)[0]
+              print("world:", name, "seed:", seed, "hash:", h)
+              if (seed, h) != ("Seed123", 502027295):
+                  sys.exit("::error::server did not preserve the seed")
           PY
 
       - name: Stop cleanly (world must save on SIGTERM)

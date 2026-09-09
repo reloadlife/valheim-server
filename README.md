@@ -139,13 +139,14 @@ Rules worth knowing:
 
 - **Only applies to a brand-new world.** The seed is baked into terrain at creation, so
   an existing `WORLD_NAME` is left alone and the variable is ignored (with a log line).
-  To reseed, change `WORLD_NAME` or delete `data/worlds_local/<name>.*`.
+  To reseed, change `WORLD_NAME` or delete both `data/worlds_local/<name>` and
+  `data/worlds_local/<name>.*` — a world in either layout counts as existing.
 - Seed must be 1–10 alphanumeric characters — the same limit the client enforces.
 - Leave it empty for a random seed.
 
 The `.fwl` format is community reverse-engineered, not documented by Iron Gate, so CI
 boots a real server on every push and asserts it loads a generated world and preserves
-the seed. If Steam ever changes the format, the build goes red rather than your world
+the seed — in whichever layout that build writes. If Steam ever changes the format, the build goes red rather than your world
 silently coming out wrong.
 
 ## Access control
@@ -235,18 +236,25 @@ data/
 ├── bannedlist.txt
 ├── permittedlist.txt
 └── worlds_local/
-    ├── Dedicated.fwl     # metadata: name, seed, modifiers
-    ├── Dedicated.db      # the actual world
-    └── *.old             # rolling backups
+    ├── Dedicated/            # 1.0 layout: the world itself
+    │   ├── _main.1.fwl2      # metadata: name, seed, modifiers
+    │   ├── _main.1.db2       # the world data
+    │   ├── *.chunk           # per-zone chunks
+    │   └── _main.1.ok        # written last; marks the save complete
+    └── Dedicated_backup_*/   # rolling backups
 ```
+
+Valheim 1.0 replaced the old `Dedicated.fwl` + `Dedicated.db` pair with the directory
+above, converting a legacy world (and keeping a backup of it) the first time it loads
+one. Both layouts still work as input; the server only ever writes the new one.
 
 The server's own backups are on by default (`BACKUPS=true`): one every 2 hours, one
 every 12 hours, 3 kept of each.
 
-To restore, stop the server, copy a `.db.old` over the `.db`, and start again. To bring
-an existing world in, drop its `.db` and `.fwl` into `data/worlds_local/` and set
-`WORLD_NAME` to the filename without the extension. The two files must always travel
-together.
+To restore, stop the server, replace `worlds_local/<name>/` with one of the
+`<name>_backup_*` directories, and start again. To bring an existing world in, drop
+either its directory or its legacy `.db` + `.fwl` pair into `data/worlds_local/` and set
+`WORLD_NAME` to that name. A legacy pair must always travel together.
 
 ## Common operations
 

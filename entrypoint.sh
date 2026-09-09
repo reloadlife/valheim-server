@@ -92,11 +92,17 @@ fi
 # flag. Writing the .fwl before first boot pins the seed; the server generates
 # the matching .db from it. An existing world is never touched: its seed is
 # already baked into terrain that's been played on.
+#
+# 1.0 stores a world as a worlds_local/<name>/ directory of chunks and removes the
+# legacy .fwl when it converts one. Checking only the .fwl would miss a converted
+# world, write a fresh seed file beside it, and hand the server what looks like a
+# new world — silently discarding the played one on the next restart.
 if [[ -n "$WORLD_SEED" ]]; then
   fwl="$SAVE_DIR/worlds_local/$WORLD_NAME.fwl"
-  if [[ -e "$fwl" ]]; then
+  if [[ -e "$fwl" || -d "$SAVE_DIR/worlds_local/$WORLD_NAME" ]]; then
     echo "==> World '$WORLD_NAME' already exists; ignoring WORLD_SEED."
-    echo "    To use the seed, pick a new WORLD_NAME or delete data/worlds_local/$WORLD_NAME.*"
+    echo "    To use the seed, pick a new WORLD_NAME or delete data/worlds_local/$WORLD_NAME"
+    echo "    and data/worlds_local/$WORLD_NAME.* first."
   else
     echo "==> Creating world '$WORLD_NAME' with seed '$WORLD_SEED'"
     mkworld.sh "$WORLD_NAME" "$WORLD_SEED" "$fwl"

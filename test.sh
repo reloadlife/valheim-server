@@ -96,6 +96,26 @@ pw=$(env SAVE_DIR="$tmp/save" PATH="$tmp/stub:$PATH" SERVER_PUBLIC=1 SERVER_PASS
        bash ./entrypoint.sh 2>&1 | grep -c 'needs SERVER_PASSWORD' || true)
 check "public server requires a password" "$pw" "1"
 
+# World-existence guard. 1.0 stores a world as worlds_local/<name>/ and drops the
+# legacy .fwl when it converts one, so a check that only looks for the .fwl would
+# rewrite a seed file beside a played world and hand the server a brand new one.
+entry_out() { # entry_out <save-dir>
+  env SERVER_PUBLIC=0 SAVE_DIR="$1" PATH="$tmp/stub:$PATH" \
+      WORLD_NAME=W WORLD_SEED=Seed123 bash ./entrypoint.sh 2>&1 || true
+}
+mkdir -p "$tmp/chunked/worlds_local/W"
+check "chunked world counts as existing" \
+  "$(entry_out "$tmp/chunked" | grep -c 'already exists' || true)" "1"
+
+mkdir -p "$tmp/legacy/worlds_local"; : > "$tmp/legacy/worlds_local/W.fwl"
+check "legacy .fwl counts as existing" \
+  "$(entry_out "$tmp/legacy" | grep -c 'already exists' || true)" "1"
+
+# Positive control: an empty save dir must still create the world.
+mkdir -p "$tmp/fresh/worlds_local"
+check "empty save dir creates the world" \
+  "$(entry_out "$tmp/fresh" | grep -c 'Creating world' || true)" "1"
+
 # Docs drift. Every variable the entrypoint reads must be documented in both the
 # README table and .env.example, or "every setting is documented" quietly stops
 # being true the next time someone adds one.
