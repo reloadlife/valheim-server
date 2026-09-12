@@ -8,6 +8,9 @@ RUN apt-get update \
         ca-certificates \
         libatomic1 \
         libpulse0 \
+        # libparty.so (PlayFab Party, used by -crossplay) links against this; without
+        # it the plugin fails to load and the server never gets a join code.
+        libpulse-mainloop-glib0 \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
